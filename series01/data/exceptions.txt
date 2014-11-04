@@ -1,0 +1,4 @@
+folder01
+file
+.DS_Store
+test.txt
