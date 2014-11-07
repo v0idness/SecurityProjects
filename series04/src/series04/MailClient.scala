@@ -19,6 +19,7 @@ object MailClient {
 		val out = new PrintStream(socket.getOutputStream)
 		val in = new BufferedReader(new InputStreamReader(socket.getInputStream))
 		
+		println(in.readLine)
 		out.println("HELO demo.local")
 		println(in.readLine)
 		
