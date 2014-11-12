@@ -6,12 +6,11 @@ import scala.io.Source
 import scala.io.BufferedSource
 import util.control.Breaks._
 import scala.util.matching.Regex
-//import org.xbill.DNS._
 
 
 /* Université de Neuchâtel
  * Security
- * Assignment 4, 5
+ * Assignment 4, 5, 6
  * Laura Rettig (laura.rettig@unifr.ch)
  * November 12, 2014
  */
@@ -36,21 +35,25 @@ object SMTPGateway {
 		
 		out.println(smtp_in.readLine)
 		var command = in.readLine
+		
 		breakable {
 			var f_data = false 	// flag for data part: between DATA and ., the keyword filter is applied
 			while (command != null) {
-				if (command.toLowerCase.contains("mail from")) {
-					if (antiSpam(hostFromEmail(command))) { out.println("SPAMMER DETECTED. NOT SENDING."); break }
-					else out.println("NO SPAMMER. GOOD.")
-				} 
+				if (command.toLowerCase.contains("mail from") && antiSpam(hostFromEmail(command))) {
+					out.println("SPAMMER DETECTED. NOT SENDING."); break }
+				
 				if (command == ".") f_data = false
+				
 				if (f_data) {
 					if (antiVirScan(command)) { out.println("FOUND VIRUS. NOT SENDING."); break } 
 					command = filterKeywords(command)
 				}
-				smtp_out.write(command+"\r\n"); smtp_out.flush				
+				
+				smtp_out.write(command+"\r\n"); smtp_out.flush
+				
 				if(!f_data) out.println(smtp_in.readLine) 
 				if (command.toLowerCase == "data") f_data = true
+				
 				command = in.readLine
 			}
 		}
@@ -70,18 +73,11 @@ object SMTPGateway {
 	}
 	
 	def antiSpam(host: String): Boolean = {
-	 	// lookup IP for domain if not in IPv4 format
-		val pat = "(\\d+\\.\\d+\\.\\d+\\.\\d+)".r
-		val ip = host match {
-			case pat(ipa) => ipa
-			case _ => InetAddress.getByName(host).getHostAddress
-		}
-		// reverse order of octets
-		val reverse_ip = ip.split('.').toList.reverse.mkString(".")
-		
+		// reverse order of domain or octets (IP address)
+		val reverse_host = host.split('.').toList.reverse.mkString(".")
 		try {
 			// if the lookup succeeds, we have found a spam address
-			InetAddress.getAllByName(reverse_ip + ".dnsbl.sorbs.net")
+			InetAddress.getAllByName(reverse_host + ".dnsbl.sorbs.net")
 			return true
 		} catch {
 			// if the lookup fails, we're good
