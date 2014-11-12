@@ -6,7 +6,7 @@ import scala.io.Source
 import scala.io.BufferedSource
 import util.control.Breaks._
 import scala.util.matching.Regex
-import org.xbill.DNS._
+//import org.xbill.DNS._
 
 
 /* Université de Neuchâtel
@@ -18,10 +18,8 @@ import org.xbill.DNS._
 
 object SMTPGateway {
 	def main(args: Array[String]) {
-		//forwardSMTP("127.0.0.1", 25)
-		//println("client closed; gateway shutting down")
-		println(antiSpam(hostFromAddress("laura@80.218.18.1")))
-		//println(antiSpam(hostFromAddress("laura@demo.local")))
+		forwardSMTP("127.0.0.1", 25)
+		println("client closed; gateway shutting down")
 	}
 	
 	def forwardSMTP(host: String, port: Int) {
@@ -41,6 +39,10 @@ object SMTPGateway {
 		breakable {
 			var f_data = false 	// flag for data part: between DATA and ., the keyword filter is applied
 			while (command != null) {
+				if (command.toLowerCase.contains("mail from")) {
+					if (antiSpam(hostFromEmail(command))) { out.println("SPAMMER DETECTED. NOT SENDING."); break }
+					else out.println("NO SPAMMER. GOOD.")
+				} 
 				if (command == ".") f_data = false
 				if (f_data) {
 					if (antiVirScan(command)) { out.println("FOUND VIRUS. NOT SENDING."); break } 
@@ -68,38 +70,28 @@ object SMTPGateway {
 	}
 	
 	def antiSpam(host: String): Boolean = {
-	 	// get IP from domain IF not in IP address format
+	 	// lookup IP for domain if not in IPv4 format
 		val pat = "(\\d+\\.\\d+\\.\\d+\\.\\d+)".r
 		val ip = host match {
 			case pat(ipa) => ipa
-			case _ => getIP(host)
+			case _ => InetAddress.getByName(host).getHostAddress
 		}
 		// reverse order of octets
-		// append server
+		val reverse_ip = ip.split('.').toList.reverse.mkString(".")
 		
-		// A: address
-		// NXDOMAIN: nope, we're good
-		false
+		try {
+			// if the lookup succeeds, we have found a spam address
+			InetAddress.getAllByName(reverse_ip + ".dnsbl.sorbs.net")
+			return true
+		} catch {
+			// if the lookup fails, we're good
+			case e: UnknownHostException => return false
+		}
 	}
 	
-	def hostFromAddress(address: String): String = {
+	def hostFromEmail(address: String): String = {
 		val pat = ".*@(.*)".r
 		val pat(host) = address
 		host
-	}
-	
-	def getIP(address: String): String = {
-		// DNS lookup
-		address
-	}
-	
-	def lookup(host: String, nameServer: String): Array[String] = {
-		val l = new Lookup(host)
-		l.setResolver(new SimpleResolver(nameServer))
-		l.run()
-		if (l.getResult() == Lookup.SUCCESSFUL)
-			l.getAnswers().map(_.rdataToString())
-		else
-			Array.empty[String]
 	}
 }
