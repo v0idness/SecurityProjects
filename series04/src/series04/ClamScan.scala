@@ -1,6 +1,5 @@
 package series04
 
-//import org.apache.commons.logging._
 
 import java.io.ByteArrayInputStream
 import java.io.DataOutputStream
@@ -16,7 +15,6 @@ import java.net.SocketException
  */
 
 class ClamScan(timeout: Int, host: String, port: Int) {
-	//var log: Log = LogFactory.getLog("ClamScan")
 	
 	val CHUNK_SIZE = 2048
 	val INSTREAM = "zINSTREAM\0".getBytes
