@@ -11,7 +11,7 @@ import util.control.Breaks._
  * Security
  * Assignment 7
  * Laura Rettig (laura.rettig@unifr.ch)
- * November 22, 2014
+ * November 26, 2014
  */
 
 object HTTPProxy {
@@ -36,7 +36,6 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		
 		var hostConn = new Socket
 		var http_out: BufferedWriter = null
-		var http_in: BufferedReader = null
 		
 		var host, path = ""
 		var currentLine = "\n"
@@ -54,10 +53,9 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 							
 							try {
 								hostConn.connect(new InetSocketAddress(host, 80))
-								http_out = new BufferedWriter(new OutputStreamWriter(hostConn.getOutputStream))
-								http_in = new BufferedReader(new InputStreamReader(hostConn.getInputStream))					
+								http_out = new BufferedWriter(new OutputStreamWriter(hostConn.getOutputStream))				
 							} catch {
-							case e: Exception => 1
+							case e: Exception => println(Thread.currentThread().getName() + " # could not connect to host")
 							}
 							currentLine = "GET " + path + " HTTP/1.1"
 						}
@@ -70,13 +68,15 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 			println(Thread.currentThread().getName() + " # " + requestBuilder)
 			http_out.write(requestBuilder); http_out.flush
 		
-			var currReadLine = ""
-			do { 
-				currReadLine = http_in.readLine
-				println(Thread.currentThread().getName() + " # " + currReadLine)
-				proxy_out.println(currReadLine)
-			} while (currReadLine != null)
-			proxy_out.flush
+			var buffer = Array[Byte](4096.toByte)
+			var n = 0
+			val i = hostConn.getInputStream
+			val o = socket.getOutputStream
+			n = i.read(buffer)
+			while (n != -1) { o.write(buffer); n = i.read(buffer) }
+			
+			o.close
+			hostConn.close
 		} else if (foundBlocked) {
 			proxy_out.println("HTTP/1.1 403 Forbidden\r\n")
 			proxy_out.println("Content-Type: text/plain; charset=UTF-8\r\n")
@@ -84,6 +84,7 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 			proxy_out.println("Content blocked by proxy\r\n")
 			proxy_out.flush
 		}
+		socket.close
 	}
 	
 	def processGet(request: String): (String, String) = {
