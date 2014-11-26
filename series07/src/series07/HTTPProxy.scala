@@ -2,9 +2,10 @@ package series07
 
 import java.net._
 import java.io._
-import scala.io.BufferedSource
-import scala.io.Source
-import scala.util.matching.Regex
+import io.BufferedSource
+import io.Source
+import util.matching.Regex
+import util.control.Breaks._
 
 /* Université de Neuchâtel
  * Security
@@ -24,15 +25,13 @@ object HTTPProxy {
 			(new Thread(new ProxyServerThread(server.accept))).start
 		}
 		server.close
-	}
-	
+	}	
 }
 
 class ProxyServerThread(socket: Socket) extends Runnable {
 	def run() {		
 		val proxy_in = new BufferedSource(socket.getInputStream)
 		val lines = proxy_in.getLines
-		//val proxy_out = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream))
 		val proxy_out = new PrintWriter(socket.getOutputStream)
 		
 		var hostConn = new Socket
@@ -40,41 +39,37 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		var http_in: BufferedReader = null
 		
 		var host, path = ""
-			
 		var currentLine = "\n"
 		var requestBuilder = ""
+		var foundBlocked = false
 		
-		while (currentLine != null && currentLine != "" && !lines.isEmpty) {
-			currentLine = lines.next
-			// parse only GETs
-			if (currentLine.split(" ")(0) == "GET") {
-				val (h, p) = processGet(currentLine)
-				// TODO apply filter to host
-				host = h
-				path = if (p == "") "/" else p
-				println(Thread.currentThread().getName() + " # " + host + " : " + path)
-				
-				try {
-					hostConn.connect(new InetSocketAddress(host, 80))
-					http_out = new BufferedWriter(new OutputStreamWriter(hostConn.getOutputStream))
-					http_in = new BufferedReader(new InputStreamReader(hostConn.getInputStream))					
-				} catch {
-					case e: Exception => ""
-				}
-				
-				currentLine = "GET " + path + " HTTP/1.1"
+		breakable {
+			while (currentLine != null && currentLine != "" && !lines.isEmpty) {
+				currentLine = lines.next
+						// parse only GETs
+						if (currentLine.split(" ")(0) == "GET") {
+							val (h, p) = processGet(currentLine)
+									if (filterHost(h)) host = h else { foundBlocked = true; break }
+									path = if (p == "") "/" else p
+							
+							try {
+								hostConn.connect(new InetSocketAddress(host, 80))
+								http_out = new BufferedWriter(new OutputStreamWriter(hostConn.getOutputStream))
+								http_in = new BufferedReader(new InputStreamReader(hostConn.getInputStream))					
+							} catch {
+							case e: Exception => 1
+							}
+							currentLine = "GET " + path + " HTTP/1.1"
+						}
+				requestBuilder = requestBuilder + currentLine + "\r\n"
 			}
-			requestBuilder = requestBuilder + currentLine + "\r\n"
-			
 		}
+		
 		// only a GET establishes a connection. All others are ignored.
-		if (hostConn.isConnected) {
+		if (hostConn.isConnected && !foundBlocked) {
 			println(Thread.currentThread().getName() + " # " + requestBuilder)
 			http_out.write(requestBuilder); http_out.flush
-			println(Thread.currentThread().getName() + " # " + "sent")
-		}
 		
-		if (hostConn.isConnected) {
 			var currReadLine = ""
 			do { 
 				currReadLine = http_in.readLine
@@ -82,15 +77,12 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 				proxy_out.println(currReadLine)
 			} while (currReadLine != null)
 			proxy_out.flush
-			/*var http_in2 = hostConn.getInputStream
-			var i = 0
-			while (i != -1) {
-				var av = http_in2.available-1
-				println(Thread.currentThread().getName() + " # " + av)
-				var b = Array[Byte](av.toByte)
-				i = http_in2.read(b, 0, av)
-				socket.getOutputStream().write(b)
-			}*/
+		} else if (foundBlocked) {
+			proxy_out.println("HTTP/1.1 403 Forbidden\r\n")
+			proxy_out.println("Content-Type: text/plain; charset=UTF-8\r\n")
+			proxy_out.println("\r\n")
+			proxy_out.println("Content blocked by proxy\r\n")
+			proxy_out.flush
 		}
 	}
 	
@@ -103,9 +95,10 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 	
 	def filterHost(host: String): Boolean = {
 		val re_wildcards = for (l <- Source.fromFile("data/wildcards.txt").getLines) yield new Regex(stringToReString(l))
-		//host.split("((?=\\p{Punct})|\\s+|(?<=\\p{Punct}))").filterNot(x => wildcards.contains(x.toLowerCase)).mkString(" ")
-		true
+		var count_m = 0
+		for (re <- re_wildcards) count_m += (re findAllIn host).length
+		if (count_m == 0) true else false
 	}
 	
-	def stringToReString(s: String): String = s.replace(".", "\\\\.").replace("*", ".*")
+	def stringToReString(s: String): String = s.replace(".", "\\.").replace("*", ".*")
 }
