@@ -6,12 +6,13 @@ import io.BufferedSource
 import io.Source
 import util.matching.Regex
 import util.control.Breaks._
+import java.security.MessageDigest
 
 /* Université de Neuchâtel
  * Security
- * Assignment 7
+ * Assignment 7, 8
  * Laura Rettig (laura.rettig@unifr.ch)
- * November 26, 2014
+ * December 8, 2014
  */
 
 object HTTPProxy {
@@ -41,6 +42,14 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		var currentLine = "\n"
 		var requestBuilder = ""
 		var foundBlocked = false
+		var allowCache = true
+		
+		/*
+		 * for caching: 
+		 * check cache-allow
+		 * check if already cached
+		 * if already cached: send if-modified-since & then, if the result is empty, return cache; else: overwrite
+		 */
 		
 		breakable {
 			while (currentLine != null && currentLine != "" && !lines.isEmpty) {
@@ -48,14 +57,14 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 						// parse only GETs
 						if (currentLine.split(" ")(0) == "GET") {
 							val (h, p) = processGet(currentLine)
-									if (filterHost(h)) host = h else { foundBlocked = true; break }
-									path = if (p == "") "/" else p
+							if (filterHost(h)) host = h else { foundBlocked = true; break }
+							path = if (p == "") "/" else p
 							
 							try {
 								hostConn.connect(new InetSocketAddress(host, 80))
 								http_out = new BufferedWriter(new OutputStreamWriter(hostConn.getOutputStream))				
 							} catch {
-							case e: Exception => println(Thread.currentThread().getName() + " # could not connect to host")
+							case e: Exception => println(Thread.currentThread().getName() + " # could not connect to host: " + e.printStackTrace())
 							}
 							currentLine = "GET " + path + " HTTP/1.1"
 						}
@@ -95,11 +104,24 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 	}
 	
 	def filterHost(host: String): Boolean = {
-		val re_wildcards = for (l <- Source.fromFile("data/wildcards.txt").getLines) yield new Regex(stringToReString(l))
+		val re_wildcards = for (l <- Source.fromFile("data/wildcards.txt").getLines) yield stringToRe(l)
 		var count_m = 0
 		for (re <- re_wildcards) count_m += (re findAllIn host).length
 		if (count_m == 0) true else false
 	}
 	
-	def stringToReString(s: String): String = s.replace(".", "\\.").replace("*", ".*")
+	def stringToRe(s: String): Regex = new Regex(s.replace(".", "\\.").replace("*", ".*"))
+	
+	/*def cacheAllowed(header: String): Boolean = {
+		
+	}*/
+	
+	def inCache(request: String): Boolean = new File("cache").list.contains(md5(request.split(" ")(1)))
+	
+	/*def addToCache(fullPath: String)
+	// compute hash
+	md5(fullPath)
+	// write to file*/
+	
+	def md5(s: String): String = MessageDigest.getInstance("MD5").digest(s.getBytes).toString
 }
