@@ -135,11 +135,6 @@ object FileIntegrity {
 		return idx
 	}
 	
-	def createChecksum(file: String): String = {
-		val fis = new FileInputStream(file);
-		val md5 = DigestUtils.md5Hex(fis);
-		fis.close
-		return md5
-	}
+	def createChecksum(file: String): String = DigestUtils.md5Hex(new FileInputStream(file))
 	
 }

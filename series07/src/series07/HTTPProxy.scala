@@ -6,7 +6,7 @@ import io.BufferedSource
 import io.Source
 import util.matching.Regex
 import util.control.Breaks._
-import java.security.MessageDigest
+import org.apache.commons.codec.digest.DigestUtils
 
 /* Université de Neuchâtel
  * Security
@@ -17,7 +17,7 @@ import java.security.MessageDigest
 
 object HTTPProxy {
 	def main(args: Array[String]) {
-		proxyServer(8080)
+		//proxyServer(8080)
 	}
 
 	def proxyServer(port: Int) {
@@ -38,7 +38,7 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		var hostConn = new Socket
 		var http_out: BufferedWriter = null
 		
-		var host, path = ""
+		var fullPath, host, path = ""
 		var currentLine = "\n"
 		var requestBuilder = ""
 		var foundBlocked = false
@@ -57,6 +57,7 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 						// parse only GETs
 						if (currentLine.split(" ")(0) == "GET") {
 							val (h, p) = processGet(currentLine)
+							fullPath = currentLine.split(" ")(1)
 							if (filterHost(h)) host = h else { foundBlocked = true; break }
 							path = if (p == "") "/" else p
 							
@@ -81,8 +82,12 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 			var n = 0
 			val i = hostConn.getInputStream
 			val o = socket.getOutputStream
+			val f = new File("cache/" + md5(fullPath)); f.createNewFile
+			// overwrite existing cache
+			// if (!f.createNewFile) { f.delete; f.createNewFile }
+			val fo = new FileOutputStream(f)
 			n = i.read(buffer)
-			while (n != -1) { o.write(buffer); n = i.read(buffer) }
+			while (n != -1) { o.write(buffer); fo.write(buffer); n = i.read(buffer) }
 			
 			o.close
 			hostConn.close
@@ -107,21 +112,21 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		val re_wildcards = for (l <- Source.fromFile("data/wildcards.txt").getLines) yield stringToRe(l)
 		var count_m = 0
 		for (re <- re_wildcards) count_m += (re findAllIn host).length
-		if (count_m == 0) true else false
+		(count_m == 0)
 	}
 	
 	def stringToRe(s: String): Regex = new Regex(s.replace(".", "\\.").replace("*", ".*"))
 	
-	/*def cacheAllowed(header: String): Boolean = {
-		
-	}*/
+	def cacheAllowed(response: String): Boolean = 
+		!((new Regex(".*Cache-Control: (no-cache|max-age=0|no-store).*") findAllIn response).length > 0)
 	
-	def inCache(request: String): Boolean = new File("cache").list.contains(md5(request.split(" ")(1)))
+	def inCache(request: String): Boolean = new File("data/cache").list.contains(md5(request.split(" ")(1)))
 	
+	def md5(s: String): String = DigestUtils.md5Hex(s)
+
 	/*def addToCache(fullPath: String)
 	// compute hash
 	md5(fullPath)
 	// write to file*/
 	
-	def md5(s: String): String = MessageDigest.getInstance("MD5").digest(s.getBytes).toString
 }
