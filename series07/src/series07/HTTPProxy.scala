@@ -2,25 +2,24 @@ package series07
 
 import java.net._
 import java.io._
+import collection.mutable.ArrayBuffer
 import io.BufferedSource
 import io.Source
 import util.matching.Regex
 import util.control.Breaks._
 import org.apache.commons.codec.digest.DigestUtils
 import org.apache.commons.io.IOUtils
-import collection.mutable.ArrayBuffer
 
 /* Université de Neuchâtel
  * Security
- * Assignment 7, 8
+ * Assignment 7, 8: HTTP Proxy with blocking and caching
  * Laura Rettig (laura.rettig@unifr.ch)
- * December 8, 2014
+ * December 9, 2014
  */
 
 object HTTPProxy {
 	def main(args: Array[String]) {
 		proxyServer(8080)
-		//test()
 	}
 
 	def proxyServer(port: Int) {
@@ -30,41 +29,7 @@ object HTTPProxy {
 		}
 		server.close
 	}
-	
-	def test() {
-		val server = new ServerSocket(8080)
-		while(true) {
-			val socket = server.accept
-			val proxy_in = new BufferedSource(socket.getInputStream)
-			val lines = proxy_in.getLines
-			val proxy_out = new PrintWriter(socket.getOutputStream)
-			val currentLine = lines.next
-			println(currentLine)
-			
-			if (currentLine.split(" ")(0) == "GET") {
-				val f = new File("data/cache/f9bdecf8f71cd6eaa84d2c1bdfcd5ff6")	
-				val bfi = new BufferedReader(new FileReader(f)).lines()
-				var s: String = ""
-				//bfi.forEach(s -> { proxy_out.println(s) } )
-				proxy_out.flush
-				
-			/* 
-				val fi = new FileInputStream(f)
-				val o = socket.getOutputStream
-				var buffer = Array[Byte](4096.toByte)
-				var n = fi.read(buffer)
-				println(fi.available)
-				// TODO doesn't seem to work
-				while (n != -1) { o.write(buffer); n = fi.read(buffer) }
-			 * 
-			 */
-				println("all clear")
-				
-			}
-		}
-		
-		server.close 
-	}
+
 }
 
 class ProxyServerThread(socket: Socket) extends Runnable {
@@ -87,13 +52,6 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		
 		var get_f = false
 		
-		/*
-		 * for caching: 
-		 * check cache-allow
-		 * check if already cached
-		 * if already cached: send if-modified-since & then, if the result is empty, return cache; else: overwrite
-		 */
-		
 		breakable {
 			while (currentLine != null && currentLine != "" && !lines.isEmpty) {
 				currentLine = lines.next
@@ -104,6 +62,7 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 					fullPath = currentLine.split(" ")(1)
 					cached = inCache(fullPath)
 					f = new File("data/cache/" + md5(fullPath))
+					if (f.length == 0) cached = false		// exclude empty cache
 					if (filterHost(h)) host = h else { foundBlocked = true; break }
 					path = if (p == "") "/" else p
 					
@@ -115,17 +74,16 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 					}
 					currentLine = "GET " + path + " HTTP/1.1"
 				} else if (!get_f) {
-					println(currentLine)
+					// TODO: support CONNECT
+					println(Thread.currentThread().getName() + " # " + currentLine)
 					break
 				}
 				
-				// TODO: support CONNECT
-						
 				requestBuilder = requestBuilder + currentLine + "\r\n"
 			}
 		}
 		
-		// only a GET establishes a connection. All others are ignored.
+
 		if (hostConn.isConnected && !foundBlocked && !cached) {
 			println(Thread.currentThread().getName() + " # " + requestBuilder)
 			http_out.write(requestBuilder); http_out.flush
@@ -134,26 +92,22 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 			val o = socket.getOutputStream
 			
 			// TODO: compare timestamp of cached file with "last-modified" of response
-			
+			// send if-modified-since & then, if the result is empty, return cache; else: overwrite
 			
 			var streamBuffer = new ArrayBuffer[Byte]()
 			var buffer = Array[Byte](100.toByte)
 			var n = i.read(buffer)
 			while (n != -1) { streamBuffer ++= buffer; o.write(buffer); n = i.read(buffer) }
 			
-			
-			/* println(Thread.currentThread().getName() + " # before")
-			val bStream = IOUtils.toByteArray(i)
-			println(Thread.currentThread().getName() + " # bstream " + bStream.length) 
-			o.write(bStream); o.flush() */
-			
 			if (cacheAllowed(new String(streamBuffer.toArray[Byte]))) {
 				f.createNewFile
 				val fo = new FileOutputStream(f)
 				fo.write(streamBuffer.toArray[Byte]); fo.flush()
 			}
+			
 			o.close
 			hostConn.close
+			
 		} else if (foundBlocked) {
 			respondForbidden(socket)
 		} else if (cached) {
@@ -196,11 +150,10 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 	}
 	
 	def respondFromCache(socket: Socket, f: File) {
-		println(Thread.currentThread().getName() + " # responding from cache")
+		println(Thread.currentThread().getName() + " # responding from cache; file " + f.getName)
 		val o = socket.getOutputStream
 		o.write(IOUtils.toByteArray(new FileInputStream(f)))
 		o.flush
-		println(Thread.currentThread().getName() + " # wrote from cache	")
 	}
 	
 }
