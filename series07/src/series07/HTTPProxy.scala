@@ -17,7 +17,8 @@ import org.apache.commons.codec.digest.DigestUtils
 
 object HTTPProxy {
 	def main(args: Array[String]) {
-		//proxyServer(8080)
+		proxyServer(8080)
+		//test()
 	}
 
 	def proxyServer(port: Int) {
@@ -26,14 +27,48 @@ object HTTPProxy {
 			(new Thread(new ProxyServerThread(server.accept))).start
 		}
 		server.close
-	}	
+	}
+	
+	def test() {
+		val server = new ServerSocket(8080)
+		while(true) {
+			val socket = server.accept
+			val proxy_in = new BufferedSource(socket.getInputStream)
+			val lines = proxy_in.getLines
+			val proxy_out = new PrintWriter(socket.getOutputStream)
+			val currentLine = lines.next
+			println(currentLine)
+			
+			if (currentLine.split(" ")(0) == "GET") {
+				val f = new File("data/cache/f9bdecf8f71cd6eaa84d2c1bdfcd5ff6")	
+				val bfi = new BufferedReader(new FileReader(f)).lines()
+				var s: String = ""
+				//bfi.forEach(s -> { proxy_out.println(s) } )
+				proxy_out.flush
+				
+			/* 
+				val fi = new FileInputStream(f)
+				val o = socket.getOutputStream
+				var buffer = Array[Byte](4096.toByte)
+				var n = fi.read(buffer)
+				println(fi.available)
+				// TODO doesn't seem to work
+				while (n != -1) { o.write(buffer); n = fi.read(buffer) }
+			 * 
+			 */
+				println("all clear")
+				
+			}
+		}
+		
+		server.close 
+	}
 }
 
 class ProxyServerThread(socket: Socket) extends Runnable {
 	def run() {		
 		val proxy_in = new BufferedSource(socket.getInputStream)
 		val lines = proxy_in.getLines
-		val proxy_out = new PrintWriter(socket.getOutputStream)
 		
 		var hostConn = new Socket
 		var http_out: BufferedWriter = null
@@ -41,7 +76,11 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		var fullPath, host, path = ""
 		var currentLine = "\n"
 		var requestBuilder = ""
+			
 		var foundBlocked = false
+		
+		var f: File = null
+		var cached = false
 		var allowCache = true
 		
 		/*
@@ -58,6 +97,8 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 						if (currentLine.split(" ")(0) == "GET") {
 							val (h, p) = processGet(currentLine)
 							fullPath = currentLine.split(" ")(1)
+							cached = inCache(fullPath)
+							f = new File("data/cache/" + md5(fullPath))
 							if (filterHost(h)) host = h else { foundBlocked = true; break }
 							path = if (p == "") "/" else p
 							
@@ -74,38 +115,51 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		}
 		
 		// only a GET establishes a connection. All others are ignored.
-		if (hostConn.isConnected && !foundBlocked) {
+		if (hostConn.isConnected && !foundBlocked && !cached) {
 			println(Thread.currentThread().getName() + " # " + requestBuilder)
 			http_out.write(requestBuilder); http_out.flush
 		
-			var buffer = Array[Byte](4096.toByte)
-			var n = 0
 			val i = hostConn.getInputStream
 			val o = socket.getOutputStream
-			val f = new File("cache/" + md5(fullPath)); f.createNewFile
+			f.createNewFile
 			// overwrite existing cache
 			// if (!f.createNewFile) { f.delete; f.createNewFile }
 			val fo = new FileOutputStream(f)
-			n = i.read(buffer)
+			var buffer = Array[Byte](4096.toByte)
+			var n = i.read(buffer)
+			// TODO: buffer the response. then write to output; translate to string to check caching; possibly write to cache
 			while (n != -1) { o.write(buffer); fo.write(buffer); n = i.read(buffer) }
 			
 			o.close
 			hostConn.close
 		} else if (foundBlocked) {
+			// send 403 for blocked patterns
+			val proxy_out = new PrintWriter(socket.getOutputStream)
 			proxy_out.println("HTTP/1.1 403 Forbidden\r\n")
 			proxy_out.println("Content-Type: text/plain; charset=UTF-8\r\n")
 			proxy_out.println("\r\n")
 			proxy_out.println("Content blocked by proxy\r\n")
 			proxy_out.flush
+		} else if (cached) {
+			println(Thread.currentThread().getName() + " # " + requestBuilder)
+			// respond from cache
+			println(Thread.currentThread().getName() + " # responding from cache")
+			val fi = new FileInputStream(f)
+			println(Thread.currentThread().getName() + " # " + f.getAbsolutePath() + " " + fi.available())
+			val o = socket.getOutputStream
+			var buffer = Array[Byte](4096.toByte)
+			var n = fi.read(buffer)
+			// TODO doesn't seem to work
+			while (n != -1) { o.write(buffer); n = fi.read(buffer) }
+			println(Thread.currentThread().getName() + " # wrote from cache	")
 		}
 		socket.close
 	}
 	
 	def processGet(request: String): (String, String) = {
-		val url = request.split(" ")(1)
-				val pat = "http://([^/]*)(/?.*)".r
-				val pat(host, path) = url
-				(host, path)
+		val pat = "http://([^/]*)(/?.*)".r
+		val pat(host, path) = request.split(" ")(1)
+		(host, path)
 	}
 	
 	def filterHost(host: String): Boolean = {
@@ -115,12 +169,14 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		(count_m == 0)
 	}
 	
-	def stringToRe(s: String): Regex = new Regex(s.replace(".", "\\.").replace("*", ".*"))
+	def stringToRe(s: String): Regex = 
+		new Regex(s.replace(".", "\\.").replace("*", ".*"))
 	
 	def cacheAllowed(response: String): Boolean = 
-		!((new Regex(".*Cache-Control: (no-cache|max-age=0|no-store).*") findAllIn response).length > 0)
+		!((new Regex(".*Cache-Control:.*(no-cache|max-age=0|no-store).*") findAllIn response).length > 0)
 	
-	def inCache(request: String): Boolean = new File("data/cache").list.contains(md5(request.split(" ")(1)))
+	def inCache(path: String): Boolean = 
+		new File("data/cache").list.contains(md5(path))
 	
 	def md5(s: String): String = DigestUtils.md5Hex(s)
 

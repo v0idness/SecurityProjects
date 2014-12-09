@@ -88,7 +88,7 @@ object FileIntegrity {
 		for ((n,_,_,_) <- idx_old_copy) errorMessages += n + " has been deleted"
 		for ((n,_,_,_) <- idx_new_copy) errorMessages += n + " has been created"
 		
-		return errorMessages
+		errorMessages
 	}
 	
 	
