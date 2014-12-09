@@ -85,6 +85,8 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		var cached = false
 		var allowCache = true
 		
+		var get_f = false
+		
 		/*
 		 * for caching: 
 		 * check cache-allow
@@ -95,23 +97,30 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		breakable {
 			while (currentLine != null && currentLine != "" && !lines.isEmpty) {
 				currentLine = lines.next
-						// parse only GETs
-						if (currentLine.split(" ")(0) == "GET") {
-							val (h, p) = processGet(currentLine)
-							fullPath = currentLine.split(" ")(1)
-							cached = inCache(fullPath)
-							f = new File("data/cache/" + md5(fullPath))
-							if (filterHost(h)) host = h else { foundBlocked = true; break }
-							path = if (p == "") "/" else p
-							
-							try {
-								hostConn.connect(new InetSocketAddress(host, 80))
-								http_out = new BufferedWriter(new OutputStreamWriter(hostConn.getOutputStream))				
-							} catch {
-							case e: Exception => println(Thread.currentThread().getName() + " # could not connect to host: " + e.printStackTrace())
-							}
-							currentLine = "GET " + path + " HTTP/1.1"
-						}
+				// parse only GETs
+				if (currentLine.split(" ")(0) == "GET") {
+					get_f = true
+					val (h, p) = processGet(currentLine)
+					fullPath = currentLine.split(" ")(1)
+					cached = inCache(fullPath)
+					f = new File("data/cache/" + md5(fullPath))
+					if (filterHost(h)) host = h else { foundBlocked = true; break }
+					path = if (p == "") "/" else p
+					
+					try {
+						hostConn.connect(new InetSocketAddress(host, 80))
+						http_out = new BufferedWriter(new OutputStreamWriter(hostConn.getOutputStream))				
+					} catch {
+					case e: Exception => println(Thread.currentThread().getName() + " # could not connect to host: " + e.printStackTrace())
+					}
+					currentLine = "GET " + path + " HTTP/1.1"
+				} else if (!get_f) {
+					println(currentLine)
+					break
+				}
+				
+				// TODO: support CONNECT
+						
 				requestBuilder = requestBuilder + currentLine + "\r\n"
 			}
 		}
@@ -127,44 +136,28 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 			// TODO: compare timestamp of cached file with "last-modified" of response
 			
 			
-			/* var buffer = Array[Byte](4096.toByte)
+			var streamBuffer = new ArrayBuffer[Byte]()
+			var buffer = Array[Byte](100.toByte)
 			var n = i.read(buffer)
-			// TODO: buffer the response. then write to output; translate to string to check caching; possibly write to cache
-			while (n != -1) { o.write(buffer); fo.write(buffer); n = i.read(buffer) } */
+			while (n != -1) { streamBuffer ++= buffer; o.write(buffer); n = i.read(buffer) }
 			
-			println(Thread.currentThread().getName() + " # before")
+			
+			/* println(Thread.currentThread().getName() + " # before")
 			val bStream = IOUtils.toByteArray(i)
-			println(Thread.currentThread().getName() + " # bstream " + bStream.length)
+			println(Thread.currentThread().getName() + " # bstream " + bStream.length) 
+			o.write(bStream); o.flush() */
 			
-			o.write(bStream); o.flush()
-			if (cacheAllowed(new String(bStream))) {
+			if (cacheAllowed(new String(streamBuffer.toArray[Byte]))) {
 				f.createNewFile
 				val fo = new FileOutputStream(f)
-				println(Thread.currentThread().getName() + " # caching allowed ")
-				fo.write(bStream); fo.flush()
+				fo.write(streamBuffer.toArray[Byte]); fo.flush()
 			}
 			o.close
 			hostConn.close
 		} else if (foundBlocked) {
-			// send 403 for blocked patterns
-			val proxy_out = new PrintWriter(socket.getOutputStream)
-			proxy_out.println("HTTP/1.1 403 Forbidden\r\n")
-			proxy_out.println("Content-Type: text/plain; charset=UTF-8\r\n")
-			proxy_out.println("\r\n")
-			proxy_out.println("Content blocked by proxy\r\n")
-			proxy_out.flush
+			respondForbidden(socket)
 		} else if (cached) {
-			println(Thread.currentThread().getName() + " # " + requestBuilder)
-			// respond from cache
-			println(Thread.currentThread().getName() + " # responding from cache")
-			val fi = new FileInputStream(f)
-			println(Thread.currentThread().getName() + " # " + f.getAbsolutePath() + " " + fi.available())
-			val o = socket.getOutputStream
-			var buffer = Array[Byte](4096.toByte)
-			var n = fi.read(buffer)
-			// TODO doesn't seem to work
-			while (n != -1) { o.write(buffer); n = fi.read(buffer) }
-			println(Thread.currentThread().getName() + " # wrote from cache	")
+			respondFromCache(socket, f)
 		}
 		socket.close
 	}
@@ -192,10 +185,22 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		new File("data/cache").list.contains(md5(path))
 	
 	def md5(s: String): String = DigestUtils.md5Hex(s)
-
-	/*def addToCache(fullPath: String)
-	// compute hash
-	md5(fullPath)
-	// write to file*/
+	
+	def respondForbidden(socket: Socket) {
+		val o = new PrintWriter(socket.getOutputStream)
+		o.println("HTTP/1.1 403 Forbidden\r\n")
+		o.println("Content-Type: text/plain; charset=UTF-8\r\n")
+		o.println("\r\n")
+		o.println("Content blocked by proxy\r\n")
+		o.flush
+	}
+	
+	def respondFromCache(socket: Socket, f: File) {
+		println(Thread.currentThread().getName() + " # responding from cache")
+		val o = socket.getOutputStream
+		o.write(IOUtils.toByteArray(new FileInputStream(f)))
+		o.flush
+		println(Thread.currentThread().getName() + " # wrote from cache	")
+	}
 	
 }
