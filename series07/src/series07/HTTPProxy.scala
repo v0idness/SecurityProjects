@@ -7,6 +7,8 @@ import io.Source
 import util.matching.Regex
 import util.control.Breaks._
 import org.apache.commons.codec.digest.DigestUtils
+import org.apache.commons.io.IOUtils
+import collection.mutable.ArrayBuffer
 
 /* Université de Neuchâtel
  * Security
@@ -121,15 +123,26 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		
 			val i = hostConn.getInputStream
 			val o = socket.getOutputStream
-			f.createNewFile
-			// overwrite existing cache
-			// if (!f.createNewFile) { f.delete; f.createNewFile }
-			val fo = new FileOutputStream(f)
-			var buffer = Array[Byte](4096.toByte)
+			
+			// TODO: compare timestamp of cached file with "last-modified" of response
+			
+			
+			/* var buffer = Array[Byte](4096.toByte)
 			var n = i.read(buffer)
 			// TODO: buffer the response. then write to output; translate to string to check caching; possibly write to cache
-			while (n != -1) { o.write(buffer); fo.write(buffer); n = i.read(buffer) }
+			while (n != -1) { o.write(buffer); fo.write(buffer); n = i.read(buffer) } */
 			
+			println(Thread.currentThread().getName() + " # before")
+			val bStream = IOUtils.toByteArray(i)
+			println(Thread.currentThread().getName() + " # bstream " + bStream.length)
+			
+			o.write(bStream); o.flush()
+			if (cacheAllowed(new String(bStream))) {
+				f.createNewFile
+				val fo = new FileOutputStream(f)
+				println(Thread.currentThread().getName() + " # caching allowed ")
+				fo.write(bStream); fo.flush()
+			}
 			o.close
 			hostConn.close
 		} else if (foundBlocked) {
