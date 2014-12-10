@@ -2,6 +2,9 @@ package series07
 
 import java.net._
 import java.io._
+import java.util.Date
+import java.text.SimpleDateFormat
+import java.text.DateFormat
 import collection.mutable.ArrayBuffer
 import io.BufferedSource
 import io.Source
@@ -14,7 +17,7 @@ import org.apache.commons.io.IOUtils
  * Security
  * Assignment 7, 8: HTTP Proxy with blocking and caching
  * Laura Rettig (laura.rettig@unifr.ch)
- * December 9, 2014
+ * December 10, 2014
  */
 
 object HTTPProxy {
@@ -70,12 +73,12 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 						hostConn.connect(new InetSocketAddress(host, 80))
 						http_out = new BufferedWriter(new OutputStreamWriter(hostConn.getOutputStream))				
 					} catch {
-					case e: Exception => println(Thread.currentThread().getName() + " # could not connect to host: " + e.printStackTrace())
+						case e: Exception => println(Thread.currentThread().getName() + " # could not connect to host: " + fullPath + "\n" + e.printStackTrace())
 					}
 					currentLine = "GET " + path + " HTTP/1.1"
 				} else if (!get_f) {
 					// TODO: support CONNECT
-					println(Thread.currentThread().getName() + " # " + currentLine)
+					//println(Thread.currentThread().getName() + " # " + currentLine)
 					break
 				}
 				
@@ -85,19 +88,30 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		
 
 		if (hostConn.isConnected && !foundBlocked && !cached) {
-			println(Thread.currentThread().getName() + " # " + requestBuilder)
-			http_out.write(requestBuilder); http_out.flush
+			//println(Thread.currentThread().getName() + " # " + requestBuilder)
+			println(Thread.currentThread().getName() + " # " + fullPath)
+			http_out.write(requestBuilder)
+			// TODO: compare timestamp of cached file with "last-modified" of response
+			// send if-modified-since & then, if the result is empty, return cache; else: overwrite
+			//if (cached) http_out.write("If-Modified-Since: " + formatDate(f.lastModified) + " GMT")
+			http_out.flush
 		
 			val i = hostConn.getInputStream
 			val o = socket.getOutputStream
 			
-			// TODO: compare timestamp of cached file with "last-modified" of response
-			// send if-modified-since & then, if the result is empty, return cache; else: overwrite
 			
 			var streamBuffer = new ArrayBuffer[Byte]()
 			var buffer = Array[Byte](100.toByte)
 			var n = i.read(buffer)
-			while (n != -1) { streamBuffer ++= buffer; o.write(buffer); n = i.read(buffer) }
+			while (n != -1) { 
+				streamBuffer ++= buffer
+				try {
+					o.write(buffer)
+					n = i.read(buffer)
+				} catch {
+					case e: Exception => n = -1 	//; println(Thread.currentThread().getName() + " # disconnected")
+				}
+			}
 			
 			if (cacheAllowed(new String(streamBuffer.toArray[Byte]))) {
 				f.createNewFile
@@ -133,7 +147,7 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		new Regex(s.replace(".", "\\.").replace("*", ".*"))
 	
 	def cacheAllowed(response: String): Boolean = 
-		!((new Regex(".*Cache-Control:.*(no-cache|max-age=0|no-store).*") findAllIn response).length > 0)
+		(new Regex(".*Cache-Control:.*(no-cache|max-age=0|no-store).*") findAllIn response).length==0
 	
 	def inCache(path: String): Boolean = 
 		new File("data/cache").list.contains(md5(path))
@@ -155,5 +169,12 @@ class ProxyServerThread(socket: Socket) extends Runnable {
 		o.write(IOUtils.toByteArray(new FileInputStream(f)))
 		o.flush
 	}
+	
+	// TODO
+	def cacheUnmodified(response: String): Boolean = 
+		(new Regex(".*(304).*") findAllIn response).length == 0
+		
+	def formatDate(time: Long): String = 
+		new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss").asInstanceOf[DateFormat].format(new Date(time))
 	
 }
